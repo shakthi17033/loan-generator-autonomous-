@@ -1,120 +1,183 @@
 import streamlit as st
-import random
 import pandas as pd
+import json
+from datetime import datetime
 
+# -----------------------------
+# PAGE CONFIG
+# -----------------------------
 st.set_page_config(page_title="Autonomous Loan Agentic System", layout="wide")
 
-st.title("🏦 Autonomous Loan Origination Agentic System")
+# Force white background
+st.markdown(
+    """
+    <style>
+        .stApp {
+            background-color: white;
+            color: black;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
-# -------------------------------
-# AGENT 1: Application Agent
-# -------------------------------
-def application_agent(form_data):
-    if form_data["age"] < 18:
-        return False, "Applicant must be 18+"
-    if form_data["income"] <= 0:
-        return False, "Income must be greater than 0"
-    return True, "Application validated"
+st.title("🏦 Decision-Driven Agentic Loan Origination System")
 
-# -------------------------------
-# AGENT 2: Document Verification Agent
-# -------------------------------
-def document_agent(uploaded_file):
+# -----------------------------
+# CONFIGURABLE POLICY RULES
+# -----------------------------
+policy_rules = {
+    "min_cibil": 650,
+    "max_dti_ratio": 0.5,
+    "max_loan_to_income": 20,
+    "max_age": 60
+}
+
+# -----------------------------
+# AGENT 1: User Interaction Agent
+# -----------------------------
+def user_interaction_agent():
+    st.header("📋 Loan Application Form")
+    with st.form("loan_form"):
+        name = st.text_input("Full Name")
+        age = st.number_input("Age", min_value=18, max_value=100)
+        income = st.number_input("Monthly Income")
+        existing_emi = st.number_input("Existing EMI")
+        loan_amount = st.number_input("Requested Loan Amount")
+        tenure = st.number_input("Loan Tenure (Months)")
+        cibil_score = st.slider("CIBIL Score", 300, 900, 700)
+        uploaded_file = st.file_uploader("Upload Income Proof (PDF)")
+        submit = st.form_submit_button("Submit Application")
+
+    return submit, {
+        "name": name,
+        "age": age,
+        "income": income,
+        "existing_emi": existing_emi,
+        "loan_amount": loan_amount,
+        "tenure": tenure,
+        "cibil_score": cibil_score,
+        "uploaded_file": uploaded_file
+    }
+
+# -----------------------------
+# AGENT 2: Data Intake Agent
+# -----------------------------
+def data_intake_agent(data):
+    errors = []
+    if not data["name"]:
+        errors.append("Name missing")
+    if data["income"] <= 0:
+        errors.append("Income must be greater than 0")
+    if data["loan_amount"] <= 0:
+        errors.append("Loan amount must be greater than 0")
+
+    return len(errors) == 0, errors
+
+# -----------------------------
+# AGENT 3: Document Verification Agent
+# -----------------------------
+def document_verification_agent(uploaded_file):
     if uploaded_file is None:
         return False, "No document uploaded"
     return True, "Document verified (Simulated)"
 
-# -------------------------------
-# AGENT 3: Credit Evaluation Agent
-# -------------------------------
-def credit_agent(cibil_score):
-    if cibil_score >= 750:
-        return "Excellent"
-    elif cibil_score >= 650:
-        return "Good"
-    elif cibil_score >= 550:
-        return "Average"
-    else:
-        return "Poor"
+# -----------------------------
+# AGENT 4: Policy Compliance Agent
+# -----------------------------
+def policy_compliance_agent(data):
+    violations = []
 
-# -------------------------------
-# AGENT 4: Risk Assessment Agent
-# -------------------------------
-def risk_agent(income, emi, loan_amount, cibil_score):
-    dti_ratio = emi / income if income > 0 else 1
-    risk_score = (loan_amount / income) * 0.4 + dti_ratio * 0.3 + (750 - cibil_score) * 0.3
-    return round(risk_score, 2)
+    dti_ratio = data["existing_emi"] / data["income"] if data["income"] > 0 else 1
+    loan_income_ratio = data["loan_amount"] / data["income"]
 
-# -------------------------------
-# AGENT 5: Decision Agent
-# -------------------------------
-def decision_agent(risk_score, credit_category):
-    if risk_score < 5 and credit_category in ["Excellent", "Good"]:
-        return "✅ Approved"
-    elif risk_score < 8:
-        return "⚠️ Conditional Approval"
-    else:
-        return "❌ Rejected"
+    if data["cibil_score"] < policy_rules["min_cibil"]:
+        violations.append("CIBIL score below minimum threshold")
 
-# -------------------------------
-# STREAMLIT UI
-# -------------------------------
+    if dti_ratio > policy_rules["max_dti_ratio"]:
+        violations.append("Debt-to-Income ratio exceeds policy limit")
 
-st.header("Loan Application Form")
+    if loan_income_ratio > policy_rules["max_loan_to_income"]:
+        violations.append("Loan-to-Income ratio exceeds policy limit")
 
-with st.form("loan_form"):
-    name = st.text_input("Full Name")
-    age = st.number_input("Age", min_value=18, max_value=100)
-    income = st.number_input("Monthly Income")
-    existing_emi = st.number_input("Existing EMI")
-    loan_amount = st.number_input("Requested Loan Amount")
-    tenure = st.number_input("Loan Tenure (Months)")
-    cibil_score = st.slider("CIBIL Score", 300, 900, 700)
-    uploaded_file = st.file_uploader("Upload Salary Slip (PDF)")
-    
-    submit = st.form_submit_button("Run Loan Agents")
+    if data["age"] > policy_rules["max_age"]:
+        violations.append("Applicant age exceeds maximum allowed")
+
+    return len(violations) == 0, violations, round(dti_ratio, 2)
+
+# -----------------------------
+# AGENT 5: Decision & Explanation Agent
+# -----------------------------
+def decision_agent(is_valid, policy_pass, violations, dti_ratio, data):
+    if not is_valid:
+        return "Rejected", "Application validation failed."
+
+    if not policy_pass:
+        explanation = f"Loan Rejected due to: {', '.join(violations)}."
+        return "Rejected", explanation
+
+    explanation = (
+        f"Loan Approved. Applicant has CIBIL score of {data['cibil_score']} "
+        f"and Debt-to-Income ratio of {dti_ratio}, within acceptable limits."
+    )
+    return "Approved", explanation
+
+# -----------------------------
+# MAIN EXECUTION
+# -----------------------------
+submit, data = user_interaction_agent()
 
 if submit:
+    st.subheader("🔄 Agent Execution Logs")
 
-    st.subheader("🔄 Agent Processing Logs")
+    # Data Intake
+    valid, errors = data_intake_agent(data)
+    if valid:
+        st.success("Data Intake Agent: Validation Passed")
+    else:
+        st.error(f"Data Intake Agent Errors: {errors}")
 
-    form_data = {
-        "name": name,
-        "age": age,
-        "income": income
-    }
+    # Document Agent
+    doc_valid, doc_msg = document_verification_agent(data["uploaded_file"])
+    if doc_valid:
+        st.success(f"Document Agent: {doc_msg}")
+    else:
+        st.error(f"Document Agent: {doc_msg}")
 
-    # Run Application Agent
-    valid, app_msg = application_agent(form_data)
-    st.write("Application Agent:", app_msg)
+    # Policy Agent
+    policy_pass, violations, dti_ratio = policy_compliance_agent(data)
+    if policy_pass:
+        st.success("Policy Compliance Agent: All checks passed")
+    else:
+        st.error(f"Policy Violations: {violations}")
 
-    if not valid:
-        st.stop()
-
-    # Run Document Agent
-    doc_valid, doc_msg = document_agent(uploaded_file)
-    st.write("Document Agent:", doc_msg)
-
-    if not doc_valid:
-        st.stop()
-
-    # Run Credit Agent
-    credit_category = credit_agent(cibil_score)
-    st.write("Credit Agent:", credit_category)
-
-    # Run Risk Agent
-    risk_score = risk_agent(income, existing_emi, loan_amount, cibil_score)
-    st.write("Risk Agent Score:", risk_score)
-
-    # Run Decision Agent
-    decision = decision_agent(risk_score, credit_category)
+    # Decision Agent
+    decision, explanation = decision_agent(valid and doc_valid, policy_pass, violations, dti_ratio, data)
 
     st.subheader("🏁 Final Decision")
-    st.success(decision)
+    if decision == "Approved":
+        st.success(decision)
+    else:
+        st.error(decision)
 
-    st.subheader("📊 Summary")
-    summary_df = pd.DataFrame({
-        "Metric": ["Credit Category", "Risk Score", "Decision"],
-        "Value": [credit_category, risk_score, decision]
-    })
-    st.table(summary_df)
+    st.write("📝 Explanation:")
+    st.write(explanation)
+
+    # Human-in-loop override
+    if decision == "Rejected":
+        st.subheader("👤 Human Review Option")
+        override = st.checkbox("Override and Approve Loan")
+        if override:
+            st.success("Loan Approved by Human Credit Manager Override")
+
+    # Decision Log
+    log_data = {
+        "Name": data["name"],
+        "Decision": decision,
+        "Explanation": explanation,
+        "Timestamp": datetime.now()
+    }
+
+    log_df = pd.DataFrame([log_data])
+    st.subheader("📊 Decision Log")
+    st.table(log_df)
